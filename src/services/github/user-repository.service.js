@@ -2,15 +2,23 @@ import { githubUserStore } from '../auth/github-user.store.js';
 
 const GITHUB_API_URL = 'https://api.github.com';
 const PAGE_SIZE = 100;
+const CACHE_TTL_MS = 30 * 1000;
 
 export class GitHubUserRepositoryService {
   constructor({ userStore = githubUserStore } = {}) {
     this.userStore = userStore;
+    this.cache = new Map();
   }
 
   async listRepositoriesForUser(user) {
     const accessToken = await this.userStore.getAccessTokenForUser(user);
     if (!accessToken) return [];
+
+    const cacheKey = String(user?.id || user?.dbId || accessToken);
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      return cached.data;
+    }
 
     const repositories = [];
     const installedRepositories = await this.listInstalledRepositoryNames(accessToken);
@@ -42,7 +50,7 @@ export class GitHubUserRepositoryService {
       if (pageItems.length < PAGE_SIZE) break;
     }
 
-    return repositories.map(repository => ({
+    const result = repositories.map(repository => ({
       id: String(repository.id),
       name: repository.full_name,
       connected: true,
@@ -54,6 +62,9 @@ export class GitHubUserRepositoryService {
       lastReviewAt: repository.updated_at || repository.pushed_at || repository.created_at,
       htmlUrl: repository.html_url,
     }));
+
+    this.cache.set(cacheKey, { timestamp: Date.now(), data: result });
+    return result;
   }
 
   async listInstalledRepositoryNames(accessToken) {

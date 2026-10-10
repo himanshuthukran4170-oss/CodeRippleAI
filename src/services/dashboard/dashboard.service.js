@@ -24,8 +24,8 @@ export class DashboardService {
     this.demoMode = demoMode;
   }
 
-  async listReviews(filters = {}) {
-    const reviews = await this.loadReviews();
+  async listReviews(filters = {}, user = null) {
+    const reviews = await this.loadReviews(user);
     const search = String(filters.search || '').trim().toLowerCase();
     const severity = String(filters.severity || '').toUpperCase();
     const repository = String(filters.repository || '').toLowerCase();
@@ -63,32 +63,127 @@ export class DashboardService {
     };
   }
 
-  async getReview(id) {
-    const reviews = await this.loadReviews();
+  async getReview(id, user = null) {
+    const reviews = await this.loadReviews(user);
     const review = reviews.find(item => String(item._id) === String(id));
     return review ? normalizeReview(review, { detail: true }) : null;
   }
 
   async getRepositories(user = null) {
-    const reviews = await this.loadReviews();
-    const repositories = new Map();
-
-    if (user && !user.demo) {
-      const githubRepositories = await this.repositoryService.listRepositoriesForUser(user);
-      for (const repository of githubRepositories) {
-        repositories.set(repository.name, { ...repository, totalRisk: 0 });
-      }
+    if (user && user.demo) {
+      return this.buildDemoRepositories();
     }
 
-    for (const review of reviews) {
-      const existing = repositories.get(review.repository) || {
-        id: review.repository,
-        name: review.repository,
-        connected: true,
+    if (!user) {
+      if (this.demoMode) return this.buildDemoRepositories();
+      const reviews = await this.loadReviews(null);
+      const repositories = new Map();
+      for (const review of reviews) {
+        const existing = repositories.get(review.repository) || {
+          id: review.repository,
+          name: review.repository,
+          connected: true,
+          reviewCount: 0,
+          totalRisk: 0,
+          criticalReviews: 0,
+          lastReviewAt: null,
+        };
+        existing.reviewCount += 1;
+        existing.totalRisk += Number(review.riskScore) || 0;
+        existing.criticalReviews += normalizeSeverity(review.severity) === 'CRITICAL' ? 1 : 0;
+        existing.lastReviewAt =
+          !existing.lastReviewAt || new Date(review.createdAt) > new Date(existing.lastReviewAt)
+            ? review.createdAt
+            : existing.lastReviewAt;
+        repositories.set(review.repository, existing);
+      }
+      return [...repositories.values()]
+        .map(repository => ({
+          ...repository,
+          averageRisk: repository.reviewCount
+            ? round(repository.totalRisk / repository.reviewCount)
+            : 0,
+          totalRisk: undefined,
+        }))
+        .sort((left, right) => new Date(right.lastReviewAt) - new Date(left.lastReviewAt));
+    }
+
+    const reviews = await this.loadReviews(user);
+    const repositories = new Map();
+
+    const githubRepositories = await this.repositoryService.listRepositoriesForUser(user);
+    for (const repository of githubRepositories) {
+      repositories.set(repository.name.toLowerCase(), {
+        ...repository,
         reviewCount: 0,
         totalRisk: 0,
         criticalReviews: 0,
         lastReviewAt: null,
+      });
+    }
+
+    const userLoginPrefix = user.login ? `${user.login.toLowerCase()}/` : null;
+
+    for (const review of reviews) {
+      const key = String(review.repository || '').toLowerCase();
+      const existing = repositories.get(key) || {
+        id: review.repository,
+        name: review.repository,
+        connected: true,
+        appInstalled: true,
+        private: false,
+        reviewCount: 0,
+        totalRisk: 0,
+        criticalReviews: 0,
+        lastReviewAt: null,
+        htmlUrl: `https://github.com/${review.repository}`,
+      };
+
+      existing.reviewCount += 1;
+      existing.totalRisk += Number(review.riskScore) || 0;
+      existing.criticalReviews += normalizeSeverity(review.severity) === 'CRITICAL' ? 1 : 0;
+      existing.lastReviewAt =
+        !existing.lastReviewAt || new Date(review.createdAt) > new Date(existing.lastReviewAt)
+          ? review.createdAt
+          : existing.lastReviewAt;
+
+      if (repositories.has(key) || (userLoginPrefix && key.startsWith(userLoginPrefix))) {
+        repositories.set(key, existing);
+      }
+    }
+
+    return [...repositories.values()]
+      .map(repository => ({
+        ...repository,
+        averageRisk: repository.reviewCount
+          ? round(repository.totalRisk / repository.reviewCount)
+          : 0,
+        totalRisk: undefined,
+      }))
+      .sort((left, right) => {
+        if (left.lastReviewAt && right.lastReviewAt) {
+          return new Date(right.lastReviewAt) - new Date(left.lastReviewAt);
+        }
+        if (left.lastReviewAt) return -1;
+        if (right.lastReviewAt) return 1;
+        return left.name.localeCompare(right.name);
+      });
+  }
+
+  buildDemoRepositories() {
+    const repositories = new Map();
+    for (const review of demoReviews) {
+      const existing = repositories.get(review.repository) || {
+        id: review.repository,
+        name: review.repository,
+        connected: true,
+        appInstalled: true,
+        private: false,
+        reviewCount: 0,
+        totalRisk: 0,
+        criticalReviews: 0,
+        lastReviewAt: null,
+        htmlUrl: `https://github.com/${review.repository}`,
       };
       existing.reviewCount += 1;
       existing.totalRisk += Number(review.riskScore) || 0;
@@ -99,7 +194,6 @@ export class DashboardService {
           : existing.lastReviewAt;
       repositories.set(review.repository, existing);
     }
-
     return [...repositories.values()]
       .map(repository => ({
         ...repository,
@@ -112,7 +206,7 @@ export class DashboardService {
   }
 
   async getAnalytics(user = null) {
-    const reviews = await this.loadReviews();
+    const reviews = await this.loadReviews(user);
     const repositories = await this.getRepositories(user);
     const normalized = reviews.map(normalizeReview);
     const totals = {
@@ -136,8 +230,8 @@ export class DashboardService {
     };
   }
 
-  async getArchitectureInsights() {
-    const reviews = await this.loadReviews();
+  async getArchitectureInsights(user = null) {
+    const reviews = await this.loadReviews(user);
     const systemCounts = countValues(reviews.flatMap(review => review.affectedSystems || []));
     const moduleScores = new Map();
 
@@ -173,8 +267,8 @@ export class DashboardService {
     };
   }
 
-  async getDependencyGraph(repository) {
-    const reviews = await this.loadReviews();
+  async getDependencyGraph(repository, user = null) {
+    const reviews = await this.loadReviews(user);
     const review = reviews.find(item => !repository || item.repository === repository);
 
     return {
@@ -266,13 +360,43 @@ export class DashboardService {
     completeReviewJob(job.id, { reviewHistoryId: history.id || null });
   }
 
-  async loadReviews() {
-    if (this.historyService.isConfigured()) {
-      const reviews = await this.historyService.listReviews({ limit: 1000 });
-      if (reviews.length || !this.demoMode) return reviews;
+  async loadReviews(user = null) {
+    if (this.demoMode && (!user || user.demo)) {
+      return demoReviews;
     }
 
-    return this.demoMode ? demoReviews : [];
+    if (!this.historyService.isConfigured()) {
+      return this.demoMode ? demoReviews : [];
+    }
+
+    const allReviews = await this.historyService.listReviews({ limit: 1000 });
+
+    if (!user || user.demo) {
+      if (allReviews.length || !this.demoMode) return allReviews;
+      return this.demoMode ? demoReviews : [];
+    }
+
+    // Filter reviews to repositories accessible by this authenticated user
+    const allowedRepoNames = new Set();
+    try {
+      const userRepos = await this.repositoryService.listRepositoriesForUser(user);
+      for (const repo of userRepos) {
+        if (repo.name) allowedRepoNames.add(repo.name.toLowerCase());
+      }
+    } catch (err) {
+      console.warn('[DashboardService] Error fetching user repos for review filtering:', err.message);
+    }
+
+    const userLoginPrefix = user.login ? `${user.login.toLowerCase()}/` : null;
+
+    const userReviews = allReviews.filter(review => {
+      const repoLower = String(review.repository || '').toLowerCase();
+      if (allowedRepoNames.has(repoLower)) return true;
+      if (userLoginPrefix && repoLower.startsWith(userLoginPrefix)) return true;
+      return false;
+    });
+
+    return userReviews;
   }
 
   async getRawReview(id) {

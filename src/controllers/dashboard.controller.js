@@ -7,7 +7,7 @@ export async function listReviews(req, res, next) {
   try {
     return res.json({
       success: true,
-      data: await dashboardService.listReviews(req.query),
+      data: await dashboardService.listReviews(req.query, req.user),
     });
   } catch (error) {
     return next(error);
@@ -20,7 +20,7 @@ export async function getReview(req, res, next) {
       return res.status(400).json({ success: false, message: 'Invalid review ID.' });
     }
 
-    const review = await dashboardService.getReview(req.params.id);
+    const review = await dashboardService.getReview(req.params.id, req.user);
     return review
       ? res.json({ success: true, data: review })
       : res.status(404).json({ success: false, message: 'Review not found.' });
@@ -29,9 +29,9 @@ export async function getReview(req, res, next) {
   }
 }
 
-export async function listRepositories(_req, res, next) {
+export async function listRepositories(req, res, next) {
   try {
-    return res.json({ success: true, data: await dashboardService.getRepositories(_req.user) });
+    return res.json({ success: true, data: await dashboardService.getRepositories(req.user) });
   } catch (error) {
     return next(error);
   }
@@ -45,11 +45,11 @@ export async function getAnalytics(req, res, next) {
   }
 }
 
-export async function getArchitecture(_req, res, next) {
+export async function getArchitecture(req, res, next) {
   try {
     return res.json({
       success: true,
-      data: await dashboardService.getArchitectureInsights(),
+      data: await dashboardService.getArchitectureInsights(req.user),
     });
   } catch (error) {
     return next(error);
@@ -60,7 +60,7 @@ export async function getDependencyGraph(req, res, next) {
   try {
     return res.json({
       success: true,
-      data: await dashboardService.getDependencyGraph(req.query.repository),
+      data: await dashboardService.getDependencyGraph(req.query.repository, req.user),
     });
   } catch (error) {
     return next(error);

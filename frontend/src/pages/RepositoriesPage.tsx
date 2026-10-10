@@ -31,7 +31,11 @@ export function RepositoriesPage() {
                 </span>
                 {repository.private && <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] dark:bg-ink">Private</span>}
               </div>
-              <p className="mt-3 text-xs text-stone-500">Last reviewed {formatDistanceToNow(new Date(repository.lastReviewAt), { addSuffix: true })}</p>
+              <p className="mt-3 text-xs text-stone-500">
+                {repository.lastReviewAt && repository.reviewCount > 0
+                  ? `Last reviewed ${formatDistanceToNow(new Date(repository.lastReviewAt), { addSuffix: true })}`
+                  : 'No reviews yet'}
+              </p>
               <div className="mt-6 grid grid-cols-3 gap-3 border-t pt-5">
                 <RepositoryMetric label="Reviews" value={repository.reviewCount} />
                 <RepositoryMetric label="Avg. risk" value={repository.averageRisk.toFixed(1)} />
