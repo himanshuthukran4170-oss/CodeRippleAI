@@ -47,8 +47,16 @@ app.use((req, res, next) => {
 });
 
 /**
- * Health Check
+ * Health Check & Root Routes
  */
+app.get('/', (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: 'CodeRipple AI server is running',
+    health: '/health',
+  });
+});
+
 app.get('/health', (req, res) => {
   console.log('✅ Health check endpoint hit');
 
